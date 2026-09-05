@@ -22,7 +22,7 @@ func coffName(s *obj.Section) string {
 	if s.Name() != s.Kind().String() {
 		return s.Name()
 	}
-	if s.Kind() == obj.ROData {
+	if s.Kind() == obj.ROData || s.Kind() == obj.RelROData {
 		return ".rdata"
 	}
 	return s.Name()
@@ -35,6 +35,11 @@ func sectionShape(k obj.SectionKind) (pecore.SecKind, pecore.SecProt) {
 	case obj.Data:
 		return pecore.SecInitData, pecore.SecRead | pecore.SecWrite
 	case obj.ROData:
+		return pecore.SecInitData, pecore.SecRead
+	case obj.RelROData:
+		// COFF has no relro and needs none: base relocations are
+		// applied before page protections are set, so read-only is
+		// both correct and what MSVC emits for the same declaration.
 		return pecore.SecInitData, pecore.SecRead
 	case obj.BSS:
 		return pecore.SecUninitData, pecore.SecRead | pecore.SecWrite

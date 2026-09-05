@@ -33,6 +33,12 @@ func kindPlacement(k obj.SectionKind) (SegSect, machocore.SecType, machocore.Sec
 		return SegSect{machocore.SEG_TEXT, machocore.SECT_CONST}, machocore.S_REGULAR, 0
 	case obj.BSS:
 		return SegSect{machocore.SEG_DATA, machocore.SECT_BSS}, machocore.S_ZEROFILL, 0
+	case obj.RelROData:
+		// (__DATA,__const), which is what clang emits for a const
+		// array of pointers and what ld moves into __DATA_CONST when
+		// it builds the image. Not (__TEXT,__const): that is inside
+		// the text segment, and a pointer there cannot be relocated.
+		return SegSect{machocore.SEG_DATA, machocore.SECT_CONST}, machocore.S_REGULAR, 0
 	}
 	return SegSect{machocore.SEG_DATA, machocore.SECT_DATA}, machocore.S_REGULAR, 0
 }

@@ -247,7 +247,7 @@ Three writers, and for once that is all of them. There is no fourth container th
 ```go
 for _, s := range o.Sections() {
     s.Index()     // its position, which is what a symbol's Section names
-    s.Kind()      // amd64.Text, amd64.Data, amd64.ROData, amd64.BSS
+    s.Kind()      // amd64.Text, amd64.Data, amd64.ROData, amd64.BSS, amd64.RelROData
     s.Name()      // ".text", or whatever SectionNamed was given
     s.Align()     // the largest alignment the builder asked for, at least 1
     s.Size()      // length in bytes

@@ -12,4 +12,8 @@ const (
 	Data   = obj.Data   // ".data"
 	ROData = obj.ROData // ".rodata"
 	BSS    = obj.BSS    // ".bss"
+
+	// RelROData is read-only data a loader has to relocate first: a
+	// table of pointers to other symbols. See obj's declaration.
+	RelROData = obj.RelROData // ".data.rel.ro"
 )

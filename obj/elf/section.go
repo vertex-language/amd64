@@ -43,6 +43,11 @@ func sectionShape(s *obj.Section) (elfcore.SHType, uint64) {
 		return elfcore.SHT_PROGBITS, elfcore.SHF_ALLOC | elfcore.SHF_WRITE
 	case obj.ROData:
 		return elfcore.SHT_PROGBITS, elfcore.SHF_ALLOC
+	case obj.RelROData:
+		// Allocated and writable: the loader relocates it, then
+		// mprotects it read-only. Without SHF_WRITE the relocation
+		// would fault.
+		return elfcore.SHT_PROGBITS, elfcore.SHF_ALLOC | elfcore.SHF_WRITE
 	}
 	return elfcore.SHT_PROGBITS, elfcore.SHF_ALLOC
 }
