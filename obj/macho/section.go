@@ -103,6 +103,32 @@ func placement(s *obj.Section, opt Options) (SegSect, machocore.SecType, machoco
 		return ss, typ, attrs, nil
 	}
 
+	// A name written as a Mach-O section specifier says everything this
+	// needs, so nothing has to be guessed: the segment, the section, the
+	// type the linker keys on, and the attributes.
+	//
+	//	__TEXT,__objc_methname,cstring_literals
+	//	__DATA,__objc_selrefs,literal_pointers,no_dead_strip
+	//
+	// It is as(1)'s own syntax, which is why it is what a compiler emits.
+	// An Objective-C image is a dozen such sections and none of them is
+	// decoration — cstring_literals is what merges two images' copies of a
+	// selector name, coalesced is why every image may define a protocol and
+	// one copy survives, and no_dead_strip is why a class the program never
+	// names by hand is still in the binary.
+	if machocore.LooksLikeSectionSpec(s.Name()) {
+		spec, err := machocore.ParseSectionSpec(s.Name())
+		if err != nil {
+			return SegSect{}, 0, 0, &obj.Error{
+				Sentinel: ErrSectionName,
+				Arch:     obj.ArchAMD64,
+				Section:  s.Name(),
+				Context:  err.Error(),
+			}
+		}
+		return SegSect{spec.Segment, spec.Section}, spec.Type, spec.Attrs, nil
+	}
+
 	if name, ok := dwarfNames[s.Name()]; ok {
 		return SegSect{machocore.SEG_DWARF, name}, machocore.S_REGULAR,
 			machocore.S_ATTR_DEBUG, nil
