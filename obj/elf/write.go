@@ -114,6 +114,28 @@ func Write(w io.Writer, o *obj.Object, opts ...Options) error {
 		return err
 	}
 
+	// A COMDAT section is a group: SHT_GROUP with GRP_COMDAT, signed by
+	// the leader, holding the section and everything associated with it.
+	// The linker keeps one group per signature and discards the rest
+	// whole, which is what makes an inline function's unwind records go
+	// with it.
+	for i, s := range secs {
+		if s.Comdat() == "" {
+			continue
+		}
+		sig, ok := syms[s.Comdat()]
+		if !ok {
+			return fmt.Errorf("elf: %s is elected on %q, which is not in the symbol table", s.Name(), s.Comdat())
+		}
+		members := []*elfobj.SectionBuilder{builders[i]}
+		for j, t := range secs {
+			if t.Associated() == s {
+				members = append(members, builders[j])
+			}
+		}
+		wr.Group(sig, elfcore.GRP_COMDAT, members...)
+	}
+
 	for i, s := range secs {
 		if err := writeRelocs(wr, builders[i], s, syms); err != nil {
 			return err

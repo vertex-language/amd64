@@ -293,3 +293,60 @@ func TestWrongArchIsRefused(t *testing.T) {
 		t.Error("Write accepted an i386 object")
 	}
 }
+
+// TestComdat is the COFF spelling of a section the linker keeps once: the
+// section carries LNK_COMDAT, is elected on the symbol the builder named,
+// and an associative section follows it.
+func TestComdat(t *testing.T) {
+	m := amd64.NewModule()
+	m.Section(amd64.Text).Label("main", amd64.Global, amd64.Func)
+	m.Section(amd64.Text).Ret()
+
+	inl := m.ComdatSection(".text", amd64.Text, "inline_f")
+	inl.Label("inline_f", amd64.Global, amd64.Func)
+	inl.Ret()
+	inl.EndLabel("inline_f")
+
+	pdata := m.AssociativeSection(".pdata", amd64.ROData, inl)
+	pdata.Label("$pdata$inline_f", amd64.Local, amd64.ObjectSym)
+	pdata.Long(0)
+
+	o, err := m.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	path, _ := write(t, o)
+
+	f, err := coff.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+
+	var comdats, associative int
+	for _, s := range f.Sections {
+		c, err := s.Comdat()
+		if err != nil {
+			t.Fatalf("%s: Comdat: %v", s.Name, err)
+		}
+		switch {
+		case c == nil:
+		case c.Selection == pecore.SelectAssociative:
+			associative++
+			if c.Associated == nil || c.Associated.Name != ".text" {
+				t.Errorf("%s associates with %v, want the inline function's .text", s.Name, c.Associated)
+			}
+		default:
+			comdats++
+			if c.Leader == nil || c.Leader.Name != "inline_f" {
+				t.Errorf("%s elected on %v, want inline_f", s.Name, c.Leader)
+			}
+			if c.Selection != pecore.SelectAny {
+				t.Errorf("%s selection = %v, want SelectAny", s.Name, c.Selection)
+			}
+		}
+	}
+	if comdats != 1 || associative != 1 {
+		t.Errorf("wrote %d COMDAT and %d associative sections, want 1 and 1", comdats, associative)
+	}
+}

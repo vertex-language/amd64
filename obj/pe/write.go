@@ -140,6 +140,31 @@ func Write(w io.Writer, o *obj.Object, opts ...Options) error {
 		return err
 	}
 
+	// COMDAT after the symbols, since the election is on one of them.
+	// The leader is defined in the section by construction -- the builder
+	// checked -- and the selection is ANY: every object that defines an
+	// inline function or a virtual table defines the same one, which is
+	// the promise the language makes and the linker takes at its word.
+	for i, s := range secs {
+		switch {
+		case s.Associated() != nil:
+			leader, ok := syms[sectionLeader(s)]
+			if !ok {
+				return fmt.Errorf("pe: %s is associative and defines no symbol to attach by", s.Name())
+			}
+			wr.SetAssociative(builders[i], builders[s.Associated().Index()], leader)
+		case s.Comdat() != "":
+			leader, ok := syms[s.Comdat()]
+			if !ok {
+				return fmt.Errorf("pe: %s is elected on %q, which is not in the symbol table", s.Name(), s.Comdat())
+			}
+			wr.SetComdat(builders[i], pecore.SelectAny, leader)
+		}
+	}
+	if err := wr.Err(); err != nil {
+		return err
+	}
+
 	for i, s := range secs {
 		if err := writeContents(wr, builders[i], s, syms); err != nil {
 			return err
@@ -147,4 +172,15 @@ func Write(w io.Writer, o *obj.Object, opts ...Options) error {
 	}
 
 	return wr.Close()
+}
+
+// sectionLeader is a symbol an associative section defines, for the
+// writer's positional layout to hang the association on. An associative
+// section is elected on nothing, so any symbol of its own will do; the
+// unwind records this exists for carry a local label each.
+func sectionLeader(s *obj.Section) string {
+	for _, sym := range s.Symbols() {
+		return sym.Name
+	}
+	return ""
 }

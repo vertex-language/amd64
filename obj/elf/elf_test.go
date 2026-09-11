@@ -327,3 +327,48 @@ func TestWrongArchIsRefused(t *testing.T) {
 		t.Error("Write accepted an i386 object")
 	}
 }
+
+// TestComdat is the ELF spelling of a section the linker keeps once: a
+// GRP_COMDAT group signed by the leader, holding the section and whatever
+// is associated with it.
+func TestComdat(t *testing.T) {
+	m := amd64.NewModule()
+	m.Section(amd64.Text).Label("main", amd64.Global, amd64.Func)
+	m.Section(amd64.Text).Ret()
+
+	inl := m.ComdatSection(".text", amd64.Text, "inline_f")
+	inl.Label("inline_f", amd64.Global, amd64.Func)
+	inl.Ret()
+	inl.EndLabel("inline_f")
+
+	eh := m.AssociativeSection(".rodata", amd64.ROData, inl)
+	eh.Label("$eh$inline_f", amd64.Local, amd64.ObjectSym)
+	eh.Long(0)
+
+	o, err := m.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	path, _ := write(t, o)
+
+	f, err := elfobj.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+
+	groups, err := f.Groups()
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("wrote %d groups, want 1", len(groups))
+	}
+	g := groups[0]
+	if !g.COMDAT() || g.Key() != "inline_f" {
+		t.Errorf("group is COMDAT=%v key=%q, want a COMDAT group keyed on inline_f", g.COMDAT(), g.Key())
+	}
+	if len(g.Members) != 2 {
+		t.Errorf("group has %d members, want the function's section and its associated one", len(g.Members))
+	}
+}

@@ -420,6 +420,23 @@ The raw-bytes builder is `Data` because `Bytes()` is the read side of the contra
 
 `Offset()` is the current end of the section: the offset the next byte will land at, the value a `Label` placed now would name. It is exported because those tables are yours to build, and building them requires knowing where you are.
 
+### COMDAT
+
+A section the linker keeps once, however many objects define it, is a `ComdatSection`, elected on a symbol the section defines:
+
+```go
+f := m.ComdatSection(".text", amd64.Text, "_ZN6Widget3getEv")
+f.Label("_ZN6Widget3getEv", amd64.Global, amd64.Func)
+// ... the body
+f.EndLabel("_ZN6Widget3getEv")
+
+pdata := m.AssociativeSection(".pdata", amd64.ROData, f)   // lives or dies with f
+```
+
+Every call makes a *new* section, whatever the name. That is the point: an inline function, a virtual table or a template instance is its own section so that a duplicate can be discarded without taking anything else with it, and a hundred inline functions are a hundred `.text` sections. Such a section is never found by `SectionNamed`, and `Finalize` refuses one elected on a symbol it does not define. An `AssociativeSection` follows a COMDAT section out of the link — a function's unwind records, which are worthless once the function's duplicate was chosen instead.
+
+The three containers spell this three ways, and the writers translate: a COMDAT section with `SelectAny` in COFF, with the associated sections as associative COMDATs; a `GRP_COMDAT` group in ELF, signed by the leader and holding the section with everything associated; and no section at all in Mach-O, where the bytes are folded into the ordinary section of the same placement at the next aligned offset and the leader becomes a weak definition, which is what ld64 coalesces by.
+
 ## Memory operands
 
 Four constructors per access width, one question each:
@@ -691,7 +708,6 @@ Mach-O is the container that disagrees with the other two about naming, and the 
 - **The table is base integer, scalar SSE, the system tranche and the locking forms: 786 forms over 265 mnemonics.** `table_base.go` declares the x86-64 baseline — the ALU block, the shifts and rotates, the unary group, `mov`/`movsx`/`movzx`, the stack, the branches, the full condition-code family as `j`/`set`/`cmov`, and the baseline-adjacent rows that carry a gate of their own — POPCNT, LZCNT, TZCNT, CMPXCHG16B and MOVBE, and the operand-less privileged and serializing instructions inline assembly reaches — HLT, CLI, STI, PAUSE, RDTSC, RDMSR, WRMSR and WBINVD, none of which anything here selects. `table_system.go` adds what an instruction selector never emits and a C header writes by hand: the bit-test group, the double-precision shifts, port I/O, the flags on the stack, the descriptor-table and TLB instructions, the cache and state-management ones, and the privileged instructions with no operands. Nothing in this tree selects any of it — the assembler is the door it comes through, which is also why it was absent until there was one. `table_sse.go` adds scalar SSE and SSE2: the moves, the six scalar arithmetic operations in both widths, `sqrt`, the four logical rows, the compares, and every conversion between the two register files. It is ungated, because SSE and SSE2 are inside `x86-64-v1` and so are baseline in the same sense `add` is. **Packed arithmetic is not in it** — `addps` adds four floats and `addss` adds one, and only the scalar half is declared. `table_lock.go` adds the memory-ordering tranche: the locking clone of every row that admits LOCK, generated from the table rather than written out, plus the three fences. `table_avx.go` is named in `forms.go`'s `init` and commented out, because it is not written yet: AVX and AVX-512 parse, print and round-trip as feature sets and gate nothing, because no VEX or EVEX row is declared, and the VEX and EVEX prefix emitters in `internal/encode` are written and unreached. Extension tranches are additional files added the same way, each with its own `build*` called from the one `init` and its own `inst_*.go` opposite it. Nothing about an existing row changes when they land.
 - **No unwind-table generation.** `.eh_frame` on SysV, `.pdata`/`.xdata` on Windows, `__compact_unwind` on Apple. All three are bytes: build the sections yourself with `SectionNamed` and `Data`. The Windows one is not optional in the way the others are — table-based exception handling requires an entry for every function that allocates stack or calls another, and an image without one unwinds unreliably rather than degrading — so a frontend targeting Windows needs a plan for it before it needs anything else on this list.
 - **No cross-section symbol differences.** `LabelDiff` covers the same-section case. Mach-O's `SUBTRACTOR` needs a `Reference` naming two symbols against one hole, which is a shared-vocabulary change and should be made once with all three writers ready — ELF and COFF would have to synthesize a pair or refuse, and refusing after the vocabulary grew is worse than not growing it yet.
-- **No COMDAT / ELF section groups,** so no inline-function or template deduplication. `.text` is one section per module, which matters more on this architecture than it did on i386.
 - **No large or medium code model support beyond the instructions.** `MovR64Imm64` and an indirect `call r64` are in the table and are all the large model is; arranging them, and knowing when you need to, is your lowering's business.
 - **No branch relaxation, by design.** A rel8 that does not reach is an error, not a silently widened instruction. In the small code model rel32 reaches everything, so unlike on a 32-bit target the absence costs nothing until you are past two gigabytes of text.
 - **No APX.** REX2, EVEX-promoted legacy instructions, and r16–r31 are not in `reg` or the table, and `RefCode4GOTPCRELX` is not a kind. The relocation number is allocated and the ladder it belongs to is understood; the registers are the work.

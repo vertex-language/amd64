@@ -31,9 +31,10 @@ import (
 // underscore, and that convention belongs to the frontend that chose the
 // names — a writer that added one would make Symbols() a lie about the object
 // it came from.
-func writeSymbols(wr *machoobj.Writer, o *obj.Object, builders []*machoobj.SectionBuilder) (map[string]machoobj.SymRef, error) {
+func writeSymbols(wr *machoobj.Writer, o *obj.Object, places []place) (map[string]machoobj.SymRef, error) {
 	syms := o.Symbols()
 	out := make(map[string]machoobj.SymRef, len(syms))
+	secs := o.Sections()
 
 	for _, sym := range syms {
 		def := machoobj.SymbolDef{
@@ -44,13 +45,20 @@ func writeSymbols(wr *machoobj.Writer, o *obj.Object, builders []*machoobj.Secti
 		}
 
 		if sym.Defined() {
-			if sym.Section < 0 || sym.Section >= len(builders) {
+			if sym.Section < 0 || sym.Section >= len(places) {
 				return nil, fmt.Errorf("macho: symbol %q names section %d of %d",
-					sym.Name, sym.Section, len(builders))
+					sym.Name, sym.Section, len(places))
 			}
 			def.Type = machocore.N_SECT
-			def.Section = builders[sym.Section]
-			def.Value = uint64(sym.Offset)
+			def.Section = places[sym.Section].b
+			def.Value = places[sym.Section].offset + uint64(sym.Offset)
+
+			// A COMDAT section's leader is a weak definition here: one
+			// per object, coalesced by the linker, which is the nearest
+			// thing this container has to electing a section.
+			if secs[sym.Section].Comdat() == sym.Name && sym.Binding == obj.Global {
+				def.WeakDef = true
+			}
 		}
 
 		if sym.Binding == obj.Weak {

@@ -113,27 +113,78 @@ func Write(w io.Writer, o *obj.Object, opts ...Options) error {
 	})
 
 	secs := o.Sections()
-	builders := make([]*machoobj.SectionBuilder, len(secs))
-	for i, s := range secs {
-		b, err := newSection(wr, s, opt)
-		if err != nil {
-			return err
-		}
-		builders[i] = b
+	places, err := placeSections(wr, secs, opt)
+	if err != nil {
+		return err
 	}
 
-	syms, err := writeSymbols(wr, o, builders)
+	syms, err := writeSymbols(wr, o, places)
 	if err != nil {
 		return err
 	}
 
 	for i, s := range secs {
-		if err := writeContents(wr, builders[i], s, syms); err != nil {
+		if err := writeContents(wr, places[i], s, syms); err != nil {
 			return err
 		}
 	}
 
 	return wr.Close()
+}
+
+// A place is where one of the object's sections landed in the file: which
+// Mach-O section, and at what offset into it.
+//
+// Mach-O has no COMDAT. What it has is a weak definition, which ld64
+// coalesces by symbol, and a section is one per (segment, name) pair -- so
+// a COMDAT section, and anything associated with it, is folded into the
+// ordinary section of the same placement at the next aligned offset, and
+// its symbols become weak. Every symbol and relocation of the folded
+// section moves by that offset; nothing else changes, since references
+// name symbols and not sections.
+type place struct {
+	b      *machoobj.SectionBuilder
+	offset uint64
+}
+
+// placeSections creates one Mach-O section per placement and assigns every
+// object section an offset in it.
+func placeSections(wr *machoobj.Writer, secs []*obj.Section, opt Options) ([]place, error) {
+	type slot struct {
+		b    *machoobj.SectionBuilder
+		size uint64
+	}
+	byPlacement := map[SegSect]*slot{}
+	places := make([]place, len(secs))
+
+	for i, s := range secs {
+		ss, _, _, err := placement(s, opt)
+		if err != nil {
+			return nil, err
+		}
+		folded := s.Comdat() != "" || s.Associated() != nil
+		sl, exists := byPlacement[ss]
+		if !exists {
+			b, err := newSection(wr, s, opt)
+			if err != nil {
+				return nil, err
+			}
+			sl = &slot{b: b}
+			byPlacement[ss] = sl
+		} else if !folded {
+			// Two ordinary sections with one placement is a caller's
+			// mistake and was one before COMDAT existed here; only a
+			// folded section joins another.
+			return nil, fmt.Errorf("macho: %s and an earlier section both place at %s", s.Name(), ss)
+		}
+		off := sl.size
+		if a := uint64(s.Align()); a > 1 && off%a != 0 {
+			off += a - off%a
+		}
+		places[i] = place{b: sl.b, offset: off}
+		sl.size = off + uint64(s.Size())
+	}
+	return places, nil
 }
 
 // targetFor builds the Mach-O target from the options and this package's one

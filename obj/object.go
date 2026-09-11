@@ -30,6 +30,9 @@ type Section struct {
 
 	bytes []byte
 	refs  []Reference
+
+	comdat     string
+	associated int
 }
 
 // SectionData is one section handed to New.
@@ -44,6 +47,26 @@ type SectionData struct {
 	Align int
 	Bytes []byte
 	Refs  []Reference
+
+	// Comdat names the symbol this section is elected on, and makes the
+	// section one the linker keeps once however many objects define it:
+	// an inline function, a virtual table, a template instance. Empty for
+	// an ordinary section. The symbol must be defined in this section.
+	//
+	// The containers spell it three ways and the writers translate: a
+	// COMDAT section in COFF, a GRP_COMDAT group in ELF, and a weak
+	// definition in Mach-O, whose linker coalesces those by symbol and has
+	// no section-level notion to offer.
+	Comdat string
+
+	// Associated is one past the index of a COMDAT section this one lives
+	// or dies with, and zero for none -- one-based so that the zero value
+	// of a SectionData claims nothing. It is how a function's unwind
+	// records follow the function out of the link when a duplicate is
+	// chosen instead. Only COFF has the notion; ELF puts the section in
+	// the same group, and Mach-O keeps it, since nothing there is
+	// discarded.
+	Associated int
 }
 
 // New assembles a finished object.
@@ -72,20 +95,28 @@ func New(arch Arch, secs []SectionData, syms []Symbol) *Object {
 		if align < 1 {
 			align = 1
 		}
+		assoc := sd.Associated - 1
+		if assoc < 0 || assoc >= len(secs) || secs[assoc].Comdat == "" {
+			assoc = -1
+		}
 		s := &Section{
-			o:     o,
-			name:  sd.Name,
-			kind:  sd.Kind,
-			index: i,
-			align: align,
-			bytes: append([]byte(nil), sd.Bytes...),
-			refs:  append([]Reference(nil), sd.Refs...),
+			o:          o,
+			name:       sd.Name,
+			kind:       sd.Kind,
+			index:      i,
+			align:      align,
+			bytes:      append([]byte(nil), sd.Bytes...),
+			refs:       append([]Reference(nil), sd.Refs...),
+			comdat:     sd.Comdat,
+			associated: assoc,
 		}
 		o.sections = append(o.sections, s)
-		// A duplicate name cannot happen: the builder refuses one with
-		// ErrDuplicate long before Finalize. First wins if it ever does,
-		// rather than silently rebinding the lookup to the later section.
-		if _, dup := o.byName[s.name]; !dup {
+		// Ordinary sections have distinct names: the builder refuses a
+		// duplicate with ErrDuplicate long before Finalize. COMDAT
+		// sections share theirs by design -- every inline function is
+		// its own .text -- and are never looked up by it, so only the
+		// first of a name is found this way.
+		if _, dup := o.byName[s.name]; !dup && s.comdat == "" {
 			o.byName[s.name] = s
 		}
 	}
@@ -141,6 +172,18 @@ func (o *Object) Symbol(name string) (Symbol, bool) {
 
 func (s *Section) Name() string      { return s.name }
 func (s *Section) Kind() SectionKind { return s.kind }
+
+// Comdat is the symbol this section is elected on, or empty for an
+// ordinary section. See SectionData.Comdat.
+func (s *Section) Comdat() string { return s.comdat }
+
+// Associated is the COMDAT section this one lives or dies with, or nil.
+func (s *Section) Associated() *Section {
+	if s.associated < 0 {
+		return nil
+	}
+	return s.o.SectionAt(s.associated)
+}
 
 // Index is the section's position, which is what a symbol's Section names.
 func (s *Section) Index() int { return s.index }

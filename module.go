@@ -124,6 +124,71 @@ func (m *Module) SectionNamed(name string, k SectionKind) *Section {
 	return s
 }
 
+// ComdatSection creates a section the linker keeps once however many
+// objects define it, elected on leader -- which must be a symbol this
+// section defines.
+//
+// Every call makes a new section, whatever the name: the point of COMDAT
+// is that each inline function or virtual table is its own section, so
+// that a duplicate can be discarded without taking anything else with it.
+// Names therefore repeat -- a hundred inline functions are a hundred
+// .text sections -- and such a section is never found by SectionNamed.
+//
+// Finalize checks that leader is defined here, because a COMDAT section
+// elected on a symbol somewhere else is an object the linker will read
+// two ways.
+func (m *Module) ComdatSection(name string, k SectionKind, leader string) *Section {
+	s := m.freshSection(name, k)
+	if s == m.spent {
+		return s
+	}
+	s.comdat = leader
+	return s
+}
+
+// AssociativeSection creates a section that lives or dies with a COMDAT
+// section: unwind records for an inline function, which are useless once
+// the function's duplicate has been chosen instead.
+func (m *Module) AssociativeSection(name string, k SectionKind, with *Section) *Section {
+	if with == nil || with.comdat == "" {
+		m.fail(&obj.Error{
+			Arch: obj.ArchAMD64, Section: name, Sentinel: obj.ErrDuplicate,
+			Context: "AssociativeSection(" + name + ") with a section that is not COMDAT",
+		})
+		return m.spent
+	}
+	s := m.freshSection(name, k)
+	if s == m.spent {
+		return s
+	}
+	s.associated = with
+	return s
+}
+
+// freshSection is a new section not registered under its name.
+func (m *Module) freshSection(name string, k SectionKind) *Section {
+	if m.done {
+		m.fail(&obj.Error{
+			Arch: obj.ArchAMD64, Sentinel: obj.ErrFinalized,
+			Context: "ComdatSection(" + name + ") after Finalize",
+		})
+		return m.spent
+	}
+	if m.err != nil {
+		return m.spent
+	}
+	s := &Section{
+		m:      m,
+		kind:   k,
+		name:   name,
+		index:  len(m.sections),
+		align:  1,
+		labels: make(map[string]int, 8),
+	}
+	m.sections = append(m.sections, s)
+	return s
+}
+
 // Sections returns the module's sections in creation order.
 func (m *Module) Sections() []*Section {
 	out := make([]*Section, len(m.sections))
@@ -229,6 +294,7 @@ func (m *Module) Finalize() (*obj.Object, error) {
 		m.resolveAliases,
 		m.resolveVisibility,
 		m.verifyRefs,
+		m.verifyComdats,
 	} {
 		if err := step(); err != nil {
 			m.err, m.finalErr = err, err
@@ -238,4 +304,23 @@ func (m *Module) Finalize() (*obj.Object, error) {
 
 	m.final = m.build()
 	return m.final, nil
+}
+
+// verifyComdats checks that every COMDAT section defines the symbol it is
+// elected on. A leader defined elsewhere -- or nowhere -- would give the
+// linker a section to keep or discard with no name to decide by.
+func (m *Module) verifyComdats() error {
+	for _, s := range m.sections {
+		if s.comdat == "" {
+			continue
+		}
+		i, ok := m.symAt[s.comdat]
+		if !ok || m.symbols[i].sec != s.index {
+			return &obj.Error{
+				Arch: obj.ArchAMD64, Section: s.name, Sentinel: obj.ErrUndefined,
+				Context: "COMDAT section elected on " + s.comdat + ", which it does not define",
+			}
+		}
+	}
+	return nil
 }

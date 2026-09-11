@@ -315,3 +315,62 @@ func TestMissingMinOSIsRefused(t *testing.T) {
 		t.Error("Write accepted an object with no MinOS")
 	}
 }
+
+// TestComdat is the Mach-O spelling of a section the linker keeps once,
+// which is no section at all: the bytes are folded into the ordinary
+// section of the same placement and the leader is a weak definition,
+// which ld64 coalesces by name.
+func TestComdat(t *testing.T) {
+	m := amd64.NewModule()
+	text := m.Section(amd64.Text)
+	text.Label("main", amd64.Global, amd64.Func)
+	text.Ret()
+	text.EndLabel("main")
+
+	inl := m.ComdatSection(".text", amd64.Text, "inline_f")
+	inl.Align(16)
+	inl.Label("inline_f", amd64.Global, amd64.Func)
+	inl.Ret()
+	inl.EndLabel("inline_f")
+
+	o, err := m.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	path, _ := write(t, o, opts(macho.Options{}))
+
+	f, err := machoobj.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+
+	syms, err := f.Symbols()
+	if err != nil {
+		t.Fatalf("Symbols: %v", err)
+	}
+	var texts int
+	for _, s := range f.Sections {
+		if s.Name == "__text" {
+			texts++
+		}
+	}
+	if texts != 1 {
+		t.Errorf("wrote %d __text sections, want the COMDAT one folded into 1", texts)
+	}
+	for _, s := range syms {
+		switch s.Name {
+		case "inline_f":
+			if !s.WeakDef() {
+				t.Error("inline_f is the leader of a COMDAT section; want N_WEAK_DEF")
+			}
+			if s.Value != 16 {
+				t.Errorf("inline_f at %#x, want 16: folded after main at its alignment", s.Value)
+			}
+		case "main":
+			if s.WeakDef() {
+				t.Error("main is ordinary; want no N_WEAK_DEF")
+			}
+		}
+	}
+}

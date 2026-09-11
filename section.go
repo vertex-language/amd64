@@ -25,6 +25,11 @@ type Section struct {
 	labels map[string]int
 	holes  []labelHole
 
+	// comdat is the symbol this section is elected on, and associated
+	// the section it follows out of the link; see Module.ComdatSection.
+	comdat     string
+	associated *Section
+
 	// dead marks the spent handle. Every call on it returns immediately.
 	dead bool
 }

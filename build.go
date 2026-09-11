@@ -18,12 +18,18 @@ import "github.com/vertex-language/amd64/obj"
 func (m *Module) build() *obj.Object {
 	secs := make([]obj.SectionData, 0, len(m.sections))
 	for _, s := range m.sections {
+		assoc := 0
+		if s.associated != nil {
+			assoc = s.associated.index + 1
+		}
 		secs = append(secs, obj.SectionData{
-			Name:  s.name,
-			Kind:  s.kind,
-			Align: s.align,
-			Bytes: s.buf,
-			Refs:  s.refs,
+			Name:       s.name,
+			Kind:       s.kind,
+			Align:      s.align,
+			Bytes:      s.buf,
+			Refs:       s.refs,
+			Comdat:     s.comdat,
+			Associated: assoc,
 		})
 	}
 

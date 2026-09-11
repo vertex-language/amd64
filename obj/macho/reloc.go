@@ -87,7 +87,7 @@ var signedLadder = map[int64]machocore.X86_64Reloc{
 // is left fixes stored. Choosing n as the number of trailing bytes,
 // -(Adjust+4), makes stored equal Addend - n, which is exactly what clang
 // emits for the same instruction.
-func writeRelocs(wr *machoobj.Writer, b *machoobj.SectionBuilder, s *obj.Section, content []byte, syms map[string]machoobj.SymRef) error {
+func writeRelocs(wr *machoobj.Writer, b *machoobj.SectionBuilder, base uint64, s *obj.Section, content []byte, syms map[string]machoobj.SymRef) error {
 	for _, r := range s.Refs() {
 		form, ok := relocTypes[r.Kind]
 		if !ok {
@@ -137,7 +137,7 @@ func writeRelocs(wr *machoobj.Writer, b *machoobj.SectionBuilder, s *obj.Section
 		}
 
 		wr.Reloc(b, machoobj.RelocSpec{
-			Address: uint64(r.Offset),
+			Address: base + uint64(r.Offset),
 			Sym:     sym,
 			Type:    uint8(typ),
 			PCRel:   form.pcrel,
