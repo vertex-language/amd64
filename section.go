@@ -307,3 +307,7 @@ func (s *Section) LabelDiff(to, from string) {
 	})
 	s.buf = append(s.buf, make([]byte, 4)...)
 }
+
+// Comdat is the symbol this section is elected on, or empty for an
+// ordinary section. See Module.ComdatSection.
+func (s *Section) Comdat() string { return s.comdat }

@@ -148,9 +148,18 @@ func Write(w io.Writer, o *obj.Object, opts ...Options) error {
 	for i, s := range secs {
 		switch {
 		case s.Associated() != nil:
+			// The association hangs on a symbol the section defines. One
+			// that defines none -- a .pdata entry is three relocations
+			// and no label -- gets a section symbol, static and named
+			// for the section, which is what MSVC emits in the same
+			// position.
 			leader, ok := syms[sectionLeader(s)]
 			if !ok {
-				return fmt.Errorf("pe: %s is associative and defines no symbol to attach by", s.Name())
+				leader = wr.Symbol(coff.SymbolDef{
+					Name:    s.Name(),
+					Section: builders[i],
+					Class:   pecore.ClassStatic,
+				})
 			}
 			wr.SetAssociative(builders[i], builders[s.Associated().Index()], leader)
 		case s.Comdat() != "":
