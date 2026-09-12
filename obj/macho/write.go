@@ -151,8 +151,9 @@ type place struct {
 // object section an offset in it.
 func placeSections(wr *machoobj.Writer, secs []*obj.Section, opt Options) ([]place, error) {
 	type slot struct {
-		b    *machoobj.SectionBuilder
-		size uint64
+		b        *machoobj.SectionBuilder
+		size     uint64
+		ordinary bool
 	}
 	byPlacement := map[SegSect]*slot{}
 	places := make([]place, len(secs))
@@ -171,11 +172,16 @@ func placeSections(wr *machoobj.Writer, secs []*obj.Section, opt Options) ([]pla
 			}
 			sl = &slot{b: b}
 			byPlacement[ss] = sl
-		} else if !folded {
+		} else if !folded && sl.ordinary {
 			// Two ordinary sections with one placement is a caller's
 			// mistake and was one before COMDAT existed here; only a
-			// folded section joins another.
+			// folded section joins another. Which of them came first is
+			// not the question: a vtable's COMDAT .data may well precede
+			// the unit's own .data.
 			return nil, fmt.Errorf("macho: %s and an earlier section both place at %s", s.Name(), ss)
+		}
+		if !folded {
+			sl.ordinary = true
 		}
 		off := sl.size
 		if a := uint64(s.Align()); a > 1 && off%a != 0 {
