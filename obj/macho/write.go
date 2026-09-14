@@ -187,6 +187,7 @@ func placeSections(wr *machoobj.Writer, secs []*obj.Section, opt Options) ([]pla
 		if a := uint64(s.Align()); a > 1 && off%a != 0 {
 			off += a - off%a
 		}
+		sl.b.RaiseAlign(uint32(s.Align()))
 		places[i] = place{b: sl.b, offset: off}
 		sl.size = off + uint64(s.Size())
 	}
