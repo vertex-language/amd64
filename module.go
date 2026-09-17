@@ -235,6 +235,18 @@ func (m *Module) Extern(name string) {
 	})
 }
 
+// ExternWeak declares a weak reference to a symbol another object defines:
+// one the link may leave unresolved, whose address is then null.
+func (m *Module) ExternWeak(name string) {
+	if m.guard("ExternWeak") {
+		return
+	}
+	m.Extern(name)
+	if i, ok := m.symAt[name]; ok && !m.symbols[i].defined {
+		m.symbols[i].binding = Weak
+	}
+}
+
 // Alias gives an existing symbol a second name at the same offset.
 //
 // It resolves at Finalize, so the order of this call and the Label it names
