@@ -24,6 +24,7 @@ type Section struct {
 
 	labels map[string]int
 	holes  []labelHole
+	deltas []symDelta
 
 	// comdat is the symbol this section is elected on, and associated
 	// the section it follows out of the link; see Module.ComdatSection.
@@ -44,6 +45,16 @@ type labelHole struct {
 	to     string
 	from   string // set for a LabelDiff; the subtrahend
 	form   string // for the diagnostic when the displacement does not fit
+}
+
+// symDelta is a field holding to - from + addend, where from is a label in
+// this section and to is any symbol. Finalize turns it into bytes or into a
+// PC-relative reference; see Section.SymDelta.
+type symDelta struct {
+	off    int
+	to     string
+	from   string
+	addend int64
 }
 
 // Module is the module this section belongs to, for a caller holding a
@@ -305,6 +316,29 @@ func (s *Section) LabelDiff(to, from string) {
 		off: len(s.buf), size: 4, to: to, from: from,
 		form: "a 4-byte label difference",
 	})
+	s.buf = append(s.buf, make([]byte, 4)...)
+}
+
+// SymDelta places a four-byte field holding to - from + addend: a relative
+// pointer, which is what Swift's metadata is built out of.
+//
+// from has to be a label in this section, and to may be any symbol --
+// in another section, or another object. That is the one shape every
+// container can express, because it is a PC-relative reference in
+// disguise: with the field at P,
+//
+//	to - from + addend  =  to - P + (P - from + addend)
+//
+// and P - from is known here. So the field becomes a RefPC32 against to,
+// which COFF writes as REL32, ELF as R_X86_64_PC32 and Mach-O as SIGNED --
+// where a subtrahend in another section would need Mach-O's SUBTRACTOR
+// pair, which COFF has no counterpart for at all. A to in this section
+// folds to bytes and leaves the linker nothing.
+func (s *Section) SymDelta(to, from string, addend int64) {
+	if !s.ok() {
+		return
+	}
+	s.deltas = append(s.deltas, symDelta{off: len(s.buf), to: to, from: from, addend: addend})
 	s.buf = append(s.buf, make([]byte, 4)...)
 }
 

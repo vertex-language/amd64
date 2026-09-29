@@ -253,6 +253,11 @@ func (m *mem) sized(w int) (operand.Operand, error) {
 		if !m.hasSym {
 			return nil, fmt.Errorf("a RIP-relative address needs a symbol")
 		}
+		// A bare sym(%rip) is PC-relative, as GNU as reads it: the
+		// modifiers above are the only other kinds a RIP operand takes.
+		if m.sym.Kind == 0 {
+			m.sym.Kind = operand.RefPC32
+		}
 		switch w {
 		case 0:
 			return operand.Rip(m.sym), nil

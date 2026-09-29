@@ -302,6 +302,7 @@ func (m *Module) Finalize() (*obj.Object, error) {
 
 	for _, step := range []func() error{
 		m.patchLabels,
+		m.resolveDeltas,
 		m.closeSizes,
 		m.resolveAliases,
 		m.resolveVisibility,

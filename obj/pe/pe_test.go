@@ -350,3 +350,55 @@ func TestComdat(t *testing.T) {
 		t.Errorf("wrote %d COMDAT and %d associative sections, want 1 and 1", comdats, associative)
 	}
 }
+
+// TestWeakReference: an undefined weak symbol is a WEAK_EXTERNAL whose
+// alternate is an absolute zero, named and searched as clang names and
+// searches it -- measured on `extern int x __attribute__((weak))`, which
+// clang writes as x, Search: Alias, linked to .weak.x.default.f.
+func TestWeakReference(t *testing.T) {
+	m := amd64.NewModule()
+	m.ExternWeak("x")
+	s := m.Section(amd64.Text)
+	s.Label("f", amd64.Global, amd64.Func)
+	s.LeaR64M(amd64.RAX, amd64.Rip(amd64.Ref("x", amd64.RefPC32)))
+	s.Ret()
+	s.EndLabel("f")
+
+	o, err := m.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	path, _ := write(t, o)
+	f, err := coff.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+
+	syms, err := f.Symbols()
+	if err != nil {
+		t.Fatalf("Symbols: %v", err)
+	}
+	var weak, alt *coff.Symbol
+	for _, sym := range syms {
+		switch sym.Name {
+		case "x":
+			weak = sym
+		case ".weak.x.default.f":
+			alt = sym
+		}
+	}
+	if weak == nil || alt == nil {
+		t.Fatalf("symbols x and .weak.x.default.f: got %v and %v", weak, alt)
+	}
+	if weak.Class != pecore.ClassWeakExternal {
+		t.Errorf("x is class %v, want WEAK_EXTERNAL", weak.Class)
+	}
+	w, ok := weak.Weak()
+	if !ok || w.Alternate == nil || w.Alternate.Name != alt.Name || w.Kind != pecore.WeakAlias {
+		t.Errorf("x's weak record is %+v, want an alias of %s", w, alt.Name)
+	}
+	if alt.Class != pecore.ClassExternal || alt.Section != pecore.SectionAbsolute || alt.Value != 0 {
+		t.Errorf("the alternate is %+v, want an external absolute zero", alt)
+	}
+}

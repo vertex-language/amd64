@@ -13,7 +13,9 @@ import (
 // obj carries and not the other two.
 //
 //   - Binding is the storage class: Global is EXTERNAL, Local is STATIC.
-//     Weak becomes STATIC, because COFF has no weak definition; see classOf.
+//     A weak definition becomes STATIC, because COFF has no weak
+//     definition; see classOf. A weak *reference* -- an undefined weak
+//     symbol -- is what COFF does have: a WEAK_EXTERNAL; see weakRef.
 //   - SymbolType survives only as the derived-function bit, which is what
 //     tells a debugger and /OPT:REF that a symbol is code. ObjectSym and
 //     ThreadLocal have no COFF spelling and become NULL: TLS in COFF is a
@@ -69,8 +71,13 @@ func symTypeOf(t obj.SymbolType) pecore.SymType {
 func writeSymbols(wr *coff.Writer, o *obj.Object, builders []*coff.SectionBuilder) (map[string]*coff.SymbolRef, error) {
 	syms := o.Symbols()
 	out := make(map[string]*coff.SymbolRef, len(syms))
+	suffix := weakSuffix(syms)
 
 	for _, sym := range syms {
+		if !sym.Defined() && sym.Binding == obj.Weak {
+			out[sym.Name] = weakRef(wr, sym.Name, suffix)
+			continue
+		}
 		class, err := classOf(sym)
 		if err != nil {
 			return nil, err
@@ -93,4 +100,38 @@ func writeSymbols(wr *coff.Writer, o *obj.Object, builders []*coff.SectionBuilde
 		out[sym.Name] = wr.Symbol(def)
 	}
 	return out, wr.Err()
+}
+
+// weakRef declares an undefined weak symbol: a reference that binds to a
+// definition if the link has one and to zero if it does not.
+//
+// That is a WEAK_EXTERNAL, whose auxiliary record names the alternate the
+// linker falls back to -- here an absolute zero, which is what a weak
+// reference to nothing reads as on every other container. The alternate is
+// looked up by name, so it is external, and so its name has to be unique to
+// this object or two objects referencing one weak name would each define
+// it: the suffix is LLVM's, the object's first external definition.
+//
+// The search kind is ALIAS, measured: clang's x86_64-windows-msvc object
+// for `extern int x __attribute__((weak))` is exactly this -- x a
+// WEAK_EXTERNAL, Search: Alias, linked to .weak.x.default.f, an EXTERNAL
+// absolute zero.
+func weakRef(wr *coff.Writer, name, suffix string) *coff.SymbolRef {
+	alt := wr.Symbol(coff.SymbolDef{
+		Name:     ".weak." + name + ".default" + suffix,
+		Class:    pecore.ClassExternal,
+		Absolute: true,
+	})
+	return wr.WeakSymbol(name, alt, pecore.WeakAlias)
+}
+
+// weakSuffix is what makes this object's weak alternates' names its own:
+// a dot and its first external definition, or nothing if it has none.
+func weakSuffix(syms []obj.Symbol) string {
+	for _, s := range syms {
+		if s.Defined() && s.Binding == obj.Global {
+			return "." + s.Name
+		}
+	}
+	return ""
 }

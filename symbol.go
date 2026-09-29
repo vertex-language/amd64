@@ -1,6 +1,10 @@
 package amd64
 
-import "github.com/vertex-language/amd64/obj"
+import (
+	"sort"
+
+	"github.com/vertex-language/amd64/obj"
+)
 
 // symbol is one entry in the module-level symbol table. Identity is the
 // name, module-wide.
@@ -150,6 +154,56 @@ func (m *Module) verifyRefs() error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// resolveDeltas turns every SymDelta into bytes, when both ends are in its
+// section, or into a PC-relative reference to its minuend. See
+// Section.SymDelta.
+func (m *Module) resolveDeltas() error {
+	for _, s := range m.sections {
+		for _, d := range s.deltas {
+			from, ok := s.labels[d.from]
+			if !ok {
+				return &obj.Error{
+					Arch: obj.ArchAMD64, Section: s.name, Offset: d.off,
+					Sentinel: obj.ErrUndefined,
+					Context:  "symbol difference " + d.to + " - " + d.from + ": " + d.from + " is not defined in " + s.name,
+					Notes: []string{
+						"a difference is expressible only as PC-relative, so its subtrahend has to be in the field's own section",
+					},
+				}
+			}
+			// The distance from the field back to the subtrahend, which
+			// is what makes this a reference to the minuend alone.
+			addend := d.addend + int64(d.off-from)
+			if to, ok := s.labels[d.to]; ok {
+				v := int64(to) - int64(d.off) + addend
+				if !fitsField(v, 4) {
+					return &obj.Error{
+						Arch: obj.ArchAMD64, Section: s.name, Offset: d.off,
+						Sentinel: obj.ErrRange,
+						Context:  "symbol difference " + d.to + " - " + d.from + " does not fit 32 signed bits",
+					}
+				}
+				for i := 0; i < 4; i++ {
+					s.buf[d.off+i] = byte(v >> (8 * i))
+				}
+				continue
+			}
+			s.refs = append(s.refs, obj.Reference{
+				Offset: d.off, Size: 4, PCRel: true,
+				Sym: d.to, Kind: obj.RefPC32, Addend: addend,
+			})
+		}
+		if len(s.deltas) > 0 {
+			// Back in field order, which is the order every other
+			// reference was placed in. Stable, so that two references
+			// at one offset stay the pair they were placed as.
+			sort.SliceStable(s.refs, func(i, j int) bool { return s.refs[i].Offset < s.refs[j].Offset })
+		}
+		s.deltas = nil
 	}
 	return nil
 }

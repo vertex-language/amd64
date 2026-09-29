@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/vertex-language/amd64"
+	"github.com/vertex-language/amd64/obj"
 )
 
 // A fragment names a symbol the module around it already defines.
@@ -80,5 +81,28 @@ func TestFragmentStillExternsWhatNothingDefines(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "puts" {
 		t.Errorf("undefined symbols = %v, want just puts", names)
+	}
+}
+
+// TestFragmentRipStoreIsPCRelative: a bare sym(%rip) is PC-relative, as GNU
+// as reads it, whatever instruction it is an operand of -- a store to a
+// global as much as a lea of one. A program's _start saves its initial
+// stack pointer that way.
+func TestFragmentRipStoreIsPCRelative(t *testing.T) {
+	m := amd64.NewModule()
+	m.Extern("saved")
+	text := m.Section(amd64.Text)
+	text.Label("f", amd64.Global, amd64.Func)
+	if err := AssembleFragment(text, "movq %rsp, saved(%rip)\nret", Options{File: "t.s"}); err != nil {
+		t.Fatalf("AssembleFragment: %v", err)
+	}
+	text.EndLabel("f")
+	o, err := m.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	refs := o.SectionNamed(".text").Refs()
+	if len(refs) != 1 || refs[0].Sym != "saved" || refs[0].Kind != obj.RefPC32 {
+		t.Fatalf("references are %+v; want one pc32 to saved", refs)
 	}
 }
