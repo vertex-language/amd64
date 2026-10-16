@@ -91,7 +91,8 @@ const (
 	FixDX
 	FixEAX
 	FixRAX
-	FixOne // the literal 1 of SHL r/m64, 1
+	FixOne  // the literal 1 of SHL r/m64, 1
+	FixXMM0 // SHA256RNDS2's and BLENDVPS's implicit third operand
 )
 
 var classNames = [...]string{
@@ -134,6 +135,7 @@ var classNames = [...]string{
 	FixEAX:    "eax",
 	FixRAX:    "rax",
 	FixOne:    "1",
+	FixXMM0:   "<xmm0>",
 }
 
 // String is the Intel spelling, which is what a form name is built from and
@@ -269,6 +271,9 @@ func (c Class) Accepts(op operand.Operand) bool {
 	case FixOne:
 		i, ok := op.(operand.Imm)
 		return ok && i.Int64() == 1
+	case FixXMM0:
+		r, ok := op.(reg.Xmm)
+		return ok && r == reg.XMM0
 	}
 	return false
 }

@@ -75,6 +75,10 @@ var (
 	fixEAX = reg.EAX
 	fixRAX = reg.RAX
 
+	// fixXMM0 is SHA256RNDS2's round constants plus schedule, which the
+	// legacy encoding reads from XMM0 and has no field to name.
+	fixXMM0 = reg.XMM0
+
 	// fixOne is the literal 1 of SHL r/m64, 1. D1 /4 has no immediate
 	// field to put another number in, which is why the helper is
 	// ShlRM64One and not ShlRM64Imm8.

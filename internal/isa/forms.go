@@ -21,6 +21,8 @@ func init() {
 	buildSystem()
 	buildSSE()
 	buildSIMD()
+	buildSIMDExt()
+	buildCrypto()
 	buildAVX()
 	buildLock()
 	index()
